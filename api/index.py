@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-app = FastAPI(title="SocialSpyAgent Web", version="1.2.1")
+app = FastAPI(title="SocialSpyAgent Web", version="1.2.2")
 TIMEOUT = 20
 
 
@@ -224,10 +224,96 @@ def search(payload: SearchRequest):
         results = yt_search(q, cutoff)
     else:
         results = filter_time(rapid(payload.platform, payload.mode, q), cutoff)
-    return {"platform": payload.platform, "mode": payload.mode, "query": q, "timeframe": payload.timeframe, "count": len(results), "results": results}
+    return {
+        "platform": payload.platform,
+        "mode": payload.mode,
+        "query": q,
+        "timeframe": payload.timeframe,
+        "count": len(results),
+        "results": results,
+    }
 
 
-PAGE = '''<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SocialSpyAgent Web</title><style>body{font-family:system-ui;background:#0b1020;color:#eef2ff;margin:0}.w{max-width:980px;margin:auto;padding:40px 18px}.p{background:#121a2c;border:1px solid #26334d;border-radius:18px;padding:18px}.g{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}input,select,button{width:100%;padding:12px;border-radius:10px;border:1px solid #34425f;background:#0e1628;color:white}button{background:#356af6;font-weight:700;cursor:pointer}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:18px}.c{background:#121a2c;border:1px solid #26334d;border-radius:14px;padding:14px;overflow:hidden}a{color:#7aa7ff}.s{color:#9ca9bf;margin:12px 0}@media(max-width:760px){.g,.cards{grid-template-columns:1fr}}</style></head><body><main class="w"><h1>SocialSpyAgent Web</h1><p>OSINT sobre contenido público de YouTube, Instagram y TikTok.</p><section class="p"><div class="g"><select id="platform"><option>youtube</option><option selected>instagram</option><option>tiktok</option></select><select id="mode"><option value="search">buscar</option><option value="account" selected>cuenta</option></select><select id="timeframe"><option value="1">24h</option><option value="2">7 días</option><option value="3">30 días</option><option value="4" selected>todo</option></select><input id="query" value="pao.arandaok" placeholder="consulta o usuario"></div><p><button id="go">Analizar @pao.arandaok</button></p><div id="status" class="s">Configurado para consultar información pública de @pao.arandaok.</div></section><section id="out" class="cards"></section></main><script>const e=s=>String(s??'').replace(/[&<>\"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[m]));go.onclick=async()=>{status.textContent='Analizando…';out.innerHTML='';try{let r=await fetch('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({platform:platform.value,mode:mode.value,query:query.value,timeframe:+timeframe.value})});let d=await r.json();if(!r.ok)throw Error(d.detail||'Error');status.textContent=d.count+' resultados';for(let x of d.results){let t=x.title||x.caption||x.description||x.username||'Resultado',u=x.url||x.video_url||'';out.innerHTML+=`<article class="c"><b>${e(t)}</b><p>${e(x.caption||x.publishedAt||x.upload_date||'')}</p>${x.follower_count!=null?`<p>Seguidores: ${e(x.follower_count)}</p>`:''}${u?`<a target="_blank" rel="noopener" href="${e(u)}">Abrir</a>`:''}</article>`}}catch(x){status.textContent=x.message}};</script></body></html>'''
+PAGE = r'''<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SocialSpyAgent Web</title>
+<style>
+body{font-family:system-ui;background:#0b1020;color:#eef2ff;margin:0}.w{max-width:980px;margin:auto;padding:40px 18px}.p{background:#121a2c;border:1px solid #26334d;border-radius:18px;padding:18px}.g{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}input,select,button{box-sizing:border-box;width:100%;padding:12px;border-radius:10px;border:1px solid #34425f;background:#0e1628;color:white}button{background:#356af6;font-weight:700;cursor:pointer}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:18px}.c{background:#121a2c;border:1px solid #26334d;border-radius:14px;padding:14px;overflow:hidden}a{color:#7aa7ff}.s{color:#9ca9bf;margin:12px 0}.err{color:#ff9b9b}@media(max-width:760px){.g,.cards{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main class="w">
+<h1>SocialSpyAgent Web</h1>
+<p>OSINT sobre contenido público de YouTube, Instagram y TikTok.</p>
+<section class="p">
+<div class="g">
+<select id="platform"><option>youtube</option><option selected>instagram</option><option>tiktok</option></select>
+<select id="mode"><option value="search">buscar</option><option value="account" selected>cuenta</option></select>
+<select id="timeframe"><option value="1">24h</option><option value="2">7 días</option><option value="3">30 días</option><option value="4" selected>todo</option></select>
+<input id="query" value="pao.arandaok" placeholder="consulta o usuario" autocomplete="off">
+</div>
+<p><button id="go" type="button">Analizar @pao.arandaok</button></p>
+<div id="status" class="s">Configurado para consultar información pública de @pao.arandaok.</div>
+</section>
+<section id="out" class="cards"></section>
+</main>
+<script>
+(function(){
+  const platformEl=document.getElementById('platform');
+  const modeEl=document.getElementById('mode');
+  const timeframeEl=document.getElementById('timeframe');
+  const queryEl=document.getElementById('query');
+  const goBtn=document.getElementById('go');
+  const statusEl=document.getElementById('status');
+  const outEl=document.getElementById('out');
+
+  const esc=(v)=>String(v??'').replace(/[&<>"']/g,(m)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+
+  async function runSearch(){
+    const q=queryEl.value.trim();
+    if(!q){statusEl.textContent='Escribí un usuario o consulta.';return;}
+    goBtn.disabled=true;
+    goBtn.textContent='Analizando…';
+    statusEl.classList.remove('err');
+    statusEl.textContent='Consultando API…';
+    outEl.innerHTML='';
+    try{
+      const response=await fetch('/api/search',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({platform:platformEl.value,mode:modeEl.value,query:q,timeframe:Number(timeframeEl.value)})
+      });
+      let data;
+      try{data=await response.json();}catch(_){throw new Error('La API devolvió una respuesta inválida.');}
+      if(!response.ok) throw new Error(data.detail||('Error HTTP '+response.status));
+      statusEl.textContent=data.count+' resultado'+(data.count===1?'':'s');
+      if(!data.results.length){outEl.innerHTML='<article class="c">No se encontraron resultados públicos.</article>';return;}
+      for(const x of data.results){
+        const title=x.title||x.full_name||x.username||x.caption||x.description||'Resultado';
+        const url=x.url||x.permalink||x.video_url||'';
+        const caption=x.caption||x.biography||x.publishedAt||x.upload_date||'';
+        const followers=x.follower_count??x.followers;
+        outEl.insertAdjacentHTML('beforeend',`<article class="c"><b>${esc(title)}</b>${caption?`<p>${esc(caption)}</p>`:''}${followers!=null?`<p>Seguidores: ${esc(followers)}</p>`:''}${url?`<a target="_blank" rel="noopener noreferrer" href="${esc(url)}">Abrir</a>`:''}</article>`);
+      }
+    }catch(err){
+      statusEl.classList.add('err');
+      statusEl.textContent='Error: '+(err&&err.message?err.message:String(err));
+    }finally{
+      goBtn.disabled=false;
+      goBtn.textContent='Analizar @'+queryEl.value.trim().replace(/^@/,'');
+    }
+  }
+
+  goBtn.addEventListener('click',runSearch);
+  queryEl.addEventListener('keydown',(ev)=>{if(ev.key==='Enter'){ev.preventDefault();runSearch();}});
+  queryEl.addEventListener('input',()=>{goBtn.textContent='Analizar @'+queryEl.value.trim().replace(/^@/,'');});
+})();
+</script>
+</body>
+</html>'''
 
 
 @app.get("/api", response_class=HTMLResponse)
