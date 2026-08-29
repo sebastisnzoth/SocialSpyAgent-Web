@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-app = FastAPI(title="SocialSpyAgent Web", version="1.6.0")
+app = FastAPI(title="SocialSpyAgent Web", version="1.7.0")
 TIMEOUT = 20
 HOST = "instagram-scraper-stable-api.p.rapidapi.com"
 CACHE_TTL_SECONDS = 300
@@ -22,7 +22,7 @@ class SearchRequest(BaseModel):
 
 
 class ToolRequest(BaseModel):
-    action: Literal["hashtag", "media", "comments", "reel"]
+    action: Literal["hashtag", "media", "comments", "reel", "followers", "following"]
     value: str = Field(min_length=1, max_length=500)
 
 
@@ -166,7 +166,8 @@ def instagram_search(query: str, exact: bool = False):
 def public_tool(action: str, value: str):
     key = api_key()
     value = value.strip()
-    ck = f"tool:{action}:{value.lower()}"
+    normalized_value = normalize_username(value) if action in ("followers", "following") else value
+    ck = f"tool:{action}:{normalized_value.lower()}"
     cached = cache_get(ck)
     if cached is not None:
         return cached, True
@@ -200,6 +201,18 @@ def public_tool(action: str, value: str):
             params={"reel_post_code_or_url": value, "type": "reel"},
             timeout=TIMEOUT,
         )
+    elif action in ("followers", "following"):
+        r = requests.post(
+            f"https://{HOST}/get_ig_user_followers_v2.php",
+            headers=headers(key, "application/x-www-form-urlencoded"),
+            data={
+                "username_or_url": f"https://www.instagram.com/{normalized_value}/",
+                "data": action,
+                "amount": "12",
+                "pagination_token": "",
+            },
+            timeout=TIMEOUT,
+        )
     else:
         raise HTTPException(400, "Acción no soportada")
 
@@ -217,7 +230,7 @@ def health():
     return {
         "ok": True,
         "rapidapi_configured": bool(os.getenv("RAPIDAPI_KEY")),
-        "version": "1.6.0",
+        "version": "1.7.0",
         "cache_ttl_seconds": CACHE_TTL_SECONDS,
         "endpoints": [
             "/search_ig.php",
@@ -226,6 +239,7 @@ def health():
             "/get_media_data_v2.php",
             "/get_post_comments.php",
             "/get_reel_title.php",
+            "/get_ig_user_followers_v2.php",
         ],
     }
 
@@ -250,7 +264,7 @@ body{font-family:system-ui;background:#0b1020;color:#eef2ff;margin:0}.w{max-widt
 <h1>SocialSpyAgent Web</h1><p>OSINT sobre información pública de Instagram.</p>
 <section class="p"><h2>Perfil</h2><div class="g"><select id="mode"><option value="account" selected>cuenta exacta</option><option value="search">búsqueda amplia</option></select><input id="query" placeholder="usuario de Instagram"></div><p><button id="go">Analizar perfil</button></p><div id="status" class="s">Listo.</div></section>
 <section id="out"></section>
-<section class="p"><h2>Herramientas públicas</h2><div class="g"><select id="tool"><option value="hashtag">Hashtag</option><option value="media">Foto/video por media code</option><option value="comments">Comentarios por media code</option><option value="reel">Reel por URL o código</option></select><input id="toolValue" placeholder="#hashtag, media code o URL"></div><p><button id="toolGo">Consultar</button></p><div id="toolStatus" class="s">Usá únicamente contenido público.</div></section><section id="toolOut"></section>
+<section class="p"><h2>Herramientas públicas</h2><div class="g"><select id="tool"><option value="followers">Seguidores</option><option value="following">Seguidos</option><option value="hashtag">Hashtag</option><option value="media">Foto/video por media code</option><option value="comments">Comentarios por media code</option><option value="reel">Reel por URL o código</option></select><input id="toolValue" placeholder="usuario, #hashtag, media code o URL"></div><p><button id="toolGo">Consultar</button></p><div id="toolStatus" class="s">Solo se muestran datos que el proveedor devuelve públicamente.</div></section><section id="toolOut"></section>
 <script>
 const esc=v=>String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 const n=v=>v==null?'—':Number(v).toLocaleString('es-AR');
