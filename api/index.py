@@ -1,4 +1,5 @@
 import os
+import time
 from typing import Literal
 
 import requests
@@ -6,9 +7,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-app = FastAPI(title="SocialSpyAgent Web", version="1.4.0")
+app = FastAPI(title="SocialSpyAgent Web", version="1.5.0")
 TIMEOUT = 20
 HOST = "instagram-scraper-stable-api.p.rapidapi.com"
+CACHE_TTL_SECONDS = 300
+CACHE: dict[str, tuple[float, list[dict]]] = {}
 
 
 class SearchRequest(BaseModel):
@@ -33,6 +36,28 @@ def normalize_username(query: str):
     if "instagram.com/" in q:
         q = q.split("instagram.com/", 1)[1]
     return q.strip("/@ ")
+
+
+def cache_key(query: str, exact: bool):
+    return f"{'account' if exact else 'search'}:{normalize_username(query).lower()}"
+
+
+def cache_get(key: str):
+    row = CACHE.get(key)
+    if not row:
+        return None
+    created_at, data = row
+    if time.time() - created_at > CACHE_TTL_SECONDS:
+        CACHE.pop(key, None)
+        return None
+    return data
+
+
+def cache_set(key: str, data: list[dict]):
+    CACHE[key] = (time.time(), data)
+    if len(CACHE) > 100:
+        oldest = min(CACHE.items(), key=lambda item: item[1][0])[0]
+        CACHE.pop(oldest, None)
 
 
 def get_profile_details(username: str, key: str):
@@ -60,6 +85,11 @@ def instagram_search(query: str, exact: bool = False):
         raise HTTPException(503, "RAPIDAPI_KEY no configurada")
 
     wanted = normalize_username(query)
+    ck = cache_key(wanted, exact)
+    cached = cache_get(ck)
+    if cached is not None:
+        return cached, True
+
     response = requests.post(
         f"https://{HOST}/search_ig.php",
         headers=rapid_headers(key, "application/x-www-form-urlencoded"),
@@ -132,7 +162,8 @@ def instagram_search(query: str, exact: bool = False):
 
         results.append(record)
 
-    return results
+    cache_set(ck, results)
+    return results, False
 
 
 @app.get("/api/health")
@@ -143,17 +174,21 @@ def health():
         "instagram_provider": "instagram-scraper-stable-api",
         "instagram_search_endpoint": "/search_ig.php",
         "instagram_profile_endpoint": "/ig_get_fb_profile_hover.php",
+        "cache_ttl_seconds": CACHE_TTL_SECONDS,
+        "cache_entries": len(CACHE),
     }
 
 
 @app.post("/api/search")
 def search(payload: SearchRequest):
-    results = instagram_search(payload.query.strip(), exact=(payload.mode == "account"))
+    results, cached = instagram_search(payload.query.strip(), exact=(payload.mode == "account"))
     return {
         "platform": "instagram",
         "mode": payload.mode,
         "query": payload.query.strip(),
         "count": len(results),
+        "cached": cached,
+        "cache_ttl_seconds": CACHE_TTL_SECONDS,
         "results": results,
     }
 
@@ -221,7 +256,7 @@ body{font-family:system-ui;background:#0b1020;color:#eef2ff;margin:0}.w{max-widt
       const response=await fetch('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({platform:'instagram',mode:modeEl.value,query:q,timeframe:4})});
       const data=await response.json();
       if(!response.ok) throw new Error(data.detail||('Error HTTP '+response.status));
-      statusEl.textContent=data.count+' resultado'+(data.count===1?'':'s');
+      statusEl.textContent=data.count+' resultado'+(data.count===1?'':'s')+(data.cached?' · caché':'');
       if(!data.results.length){outEl.innerHTML='<article class="c">No se encontraron coincidencias públicas.</article>';return;}
       for(const x of data.results){outEl.insertAdjacentHTML('beforeend',renderProfile(x));}
     }catch(err){statusEl.classList.add('err');statusEl.textContent='Error: '+(err.message||String(err));}
